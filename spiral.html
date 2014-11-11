@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+   <head>
+      <meta charset="utf=8">
+      <title>Toroidal Spiral</title>
+      <style>
+         body {
+            background-color : gray;
+            font-family: "Arial Rounded MT Bold", "Helvetica Rounded", Arial, sans-serif;
+         }
+         h1 {
+            font-size : 1.2em;
+         }
+         footer {
+            font-size : 0.7 em;
+            font-family: "Arial Rounded MT", "Helvetica Rounded", Arial, sans-serif;
+            font-style: italic;
+         }
+      </style>
+      <script src="matrix.js"></script>
+      <script src="spiral.js"></script>
+      <script id="vertex" type="x-shader">
+         //Vertex shader drastically changed for shading part
+         attribute vec4 vertexPosition;
+         attribute vec3 vertexNormal;
+         attribute vec2 vertexTexCoord;
+
+         varying vec4 color;
+
+         uniform mat4 ModelViewProjection;
+         uniform mat4 ModelViewMatrix;
+         uniform mat3 NormalMatrix;
+
+         uniform vec3 ambientLight;
+         uniform vec3 light0Color;
+         uniform vec3 light0Position;
+
+         uniform vec3 materialAmbient;
+         uniform vec3 materialDiffuse;
+         uniform vec3 materialSpecular;
+         uniform float materialShininess;
+
+         void main() {
+            gl_Position = ModelViewProjection*vertexPosition;
+
+            vec3 P = vec3(ModelViewMatrix * vertexPosition);
+            vec3 N = normalize(NormalMatrix * vertexNormal);
+            vec3 L = normalize(light0Position - P);
+
+            vec3 I_ambient = materialAmbient * ambientLight;
+            float cos_theta = dot(L,N);
+            vec3 diffuseScale = light0Color * max(0.0, cos_theta);
+            vec3 I_diffuse = materialDiffuse * diffuseScale;
+            vec3 I_specular = vec3(0.0, 0.0, 0.0);
+
+            if (cos_theta > 0.0) {
+               vec3 R = reflect(-L,N);
+               vec3 V = normalize(-P);
+               float cos_alpha = dot(R,V);
+               I_specular = materialSpecular * light0Color *
+               pow(max(0.0, cos_alpha), materialShininess);
+            }
+
+            color = vec4(I_ambient + I_diffuse + I_specular, 1.0);
+
+         }
+      </script>
+      <script id="fragment" type="x-shader">
+         precision mediump float;
+         varying vec4 color;
+         void main() {
+            gl_FragColor = color;   
+         }
+      </script>
+      <script>
+      //This is where main part of assignment code resides
+
+      //Globals
+      var gl;
+      var canvas;
+      var program;
+      var camera;
+      var Model, View, Projection;
+      //var spine; *just to show little difference from spine
+      //var spineBuffer;
+      //var TUBE_N = 80;
+
+      //Mouse drag code
+      function getMousePos(canvas, event) {
+         var rect = canvas.getBoundingClientRect();
+         return {
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top
+         };
+      }
+
+      var mouseDrag;
+
+      function mouseDown(event) {
+         mouseDrag = getMousePos(canvas, event);
+      }
+
+      var radiansPerPixel = 0.01;
+      var phiMin = -Math.PI/2 + 0.001;
+      var phiMax = +Math.PI/2 - 0.001;
+
+      var frame; // current anim frame (undefined => no frame)
+
+      function mouseMove(event) {
+         if (mouseDrag) {
+            var mousePos = getMousePos(canvas, event);
+            var dx = mousePos.x - mouseDrag.x;
+            var dy = mousePos.y - mouseDrag.y;
+            camera.theta += dx*radiansPerPixel;
+            camera.phi += dy*radiansPerPixel;
+            if (camera.phi < phiMin)
+               camera.phi = phiMin;
+            else if (camera.phi > phiMax)
+               camera.phi = phiMax;
+            mouseDrag = mousePos;
+            if (!frame)
+               frame = requestAnimationFrame(display);
+         }
+      }
+
+      function mouseUp(event) {
+         var mousePos = getMousePos(canvas, event);
+         mouseDrag = null;
+      }
+
+      
+      function init(){
+         //Boiler plate code (and shader code above) was used
+         //from a combinations of 'sphere by subdivision', 'wineglass', and 'torus' in-class examples.
+         canvas = document.getElementById("myCanvas");
+         gl = null;
+         try {
+            gl = canvas.getContext("experimental-webgl");
+         } catch(e) {gl = null;}
+         if (gl == null) {
+            alert("No WebGL -- bummer!");
+            return false;
+         }
+
+         //Setup canvas event listener
+         canvas.addEventListener("mousedown", mouseDown, false);
+         canvas.addEventListener("mousemove", mouseMove, false);
+         document.body.addEventListener("mouseup", mouseUp, false);
+
+         var v = document.getElementById("vertex").firstChild.nodeValue;
+         var vs = gl.createShader(gl.VERTEX_SHADER);
+         gl.shaderSource(vs,v);
+         gl.compileShader(vs);
+         if (!gl.getShaderParameter(vs,gl.COMPILE_STATUS)) {
+             alert(gl.getShaderInfoLog(vs));
+             return false; 
+         }
+
+         var f = document.getElementById("fragment").firstChild.nodeValue;
+         var fs = gl.createShader(gl.FRAGMENT_SHADER);
+         gl.shaderSource(fs,f);
+         gl.compileShader(fs);
+         if (!gl.getShaderParameter(fs,gl.COMPILE_STATUS)) {
+            alert(gl.getShaderInfoLog(fs));
+            return false;
+         }
+      
+         program = gl.createProgram();
+         gl.attachShader(program, vs);
+         gl.attachShader(program, fs);
+         gl.linkProgram(program);
+         gl.useProgram(program); //END USUAL BOILER PLATE CODE
+
+//*************Part II: Drawing the Mesh****************//
+
+      spiral.createGeometry();
+      spiral.createTriangleStrip();
+      spiral.createWireFrame();
+      
+      spiral.vertbuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, spiral.vertbuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, spiral.verts, gl.STATIC_DRAW);
+
+      //Need to use normal buffers now for last part of assignment
+      var normals = new Float32Array(spiral.normals);
+      spiral.normbuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, spiral.normbuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
+
+      spiral.numLineIndices = spiral.wireframe.length;
+      spiral.wireframeBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, spiral.wireframeBuffer);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, spiral.wireframe, gl.STATIC_DRAW);
+
+      spiral.triangleStripBuffer = gl.createBuffer();
+      spiral.numTriangleStripIndices = spiral.triangleStrip.length;
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, spiral.triangleStripBuffer);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, spiral.triangleStrip, gl.STATIC_DRAW);
+
+//***********FIRST PART: SPINE COMMENTED OUT**********************//
+/*NOTE: Actually drawing the spine is not needed for making the deliverable, however I did all the spine in this file instead of my spiral.js so I wanted to just comment this out to prove that I did this before moving on the the later parts of the assignment:
+*/
+
+         //spine = new Float32Array(3*TUBE_N);
+         // ... fill spine array with TUBE_N evenly spaced points along curve
+         //BEGIN FILL SPINE
+         //var p = 1;
+         //var q = 10;
+         //var a = 6.0;
+         //var b = 3.0;
+         //var x, y, z;
+         //var dt = (2*Math.PI)/TUBE_N;
+         //var t = 0;
+         //for (var i = 0; i < 3*TUBE_N; i+=3){
+         /*   var temp = a + b*Math.cos(q*t);
+            x = temp*Math.cos(p*t);
+            y = temp*Math.sin(p*t);
+            z = b*Math.sin(q*t);
+            spine[i] = x;
+            spine[i+1] = y;
+            spine[i+2] = z;
+
+            t += dt;
+         }*/
+         //END FILL SPINE /W CALCULATED POINTS
+         //spineBuffer = gl.createBuffer();
+         //gl.bindBuffer(gl.ARRAY_BUFFER, spineBuffer);
+         //gl.bufferData(gl.ARRAY_BUFFER, spine, gl.STATIC_DRAW);
+         //END BINDING SPINE TO SPINEBUFFER       
+         //Setting Orthographic Project (perspective projection: View matrix)  //Setting the Camera
+
+//*****************END PART I: SPINE CODE ************************//
+         
+         program.vertexPosition = gl.getAttribLocation(program, "vertexPosition");
+
+         program.vertexNormal = gl.getAttribLocation(program, "vertexNormal");
+
+         program.ModelViewProjection = gl.getUniformLocation(program, "ModelViewProjection");
+         
+         //New code for shading, (part III)
+         program.ModelViewMatrix = gl.getUniformLocation(program, "ModelViewMatrix");
+         program.NormalMatrix = gl.getUniformLocation(program, "NormalMatrix");
+         program.ambientLight = gl.getUniformLocation(program, "ambientLight");
+         program.light0Color = gl.getUniformLocation(program, "light0Color");
+         program.light0Position = gl.getUniformLocation(program, "light0Position");
+         program.materialAmbient = gl.getUniformLocation(program, "materialAmbient");
+         program.materialDiffuse = gl.getUniformLocation(program, "materialDiffuse");
+         program.materialSpecular = gl.getUniformLocation(program, "materialSpecular");
+         program.materialShininess = gl.getUniformLocation(program, "materialShininess");
+
+
+
+        
+         gl.clearColor(0,0.2,0.3,0.4);
+
+         //setting shading uniform variables
+         //along with usual View transformation from previous part
+         gl.uniform3fv(program.materialAmbient,[0.3, 0.4, 0.2]);
+         gl.uniform3fv(program.materialDiffuse,[0.2, 0.3, 0.0]);
+         gl.uniform3fv(program.materialSpecular,[0.6, 0.5, 0.6]);
+         gl.uniform1f(program.materialShininess, 8.0);
+      
+         gl.uniform3fv(program.ambientLight,[0.3, 0.5, 0.3]);
+         gl.uniform3fv(program.light0Color,[1.0, 1.0, 1.0]);      
+         gl.uniform3fv(program.light0Position,[10.0, 10.0, 30.0]);
+         
+         Projection = new Matrix4x4;
+         Projection.perspective(40, 1, 0.1, 100);
+      
+         View = new Matrix4x4;
+         Model = new Matrix4x4;
+      
+         camera = {};
+         camera.lookat = {x : 0, y : 0, z : 0};
+         camera.distance = 10; //distance from the object
+         camera.phi = Math.PI/6;
+         camera.theta = Math.PI/4;
+          
+         gl.viewport(0,0,canvas.width,canvas.height);
+
+         gl.enable(gl.DEPTH_TEST);
+         gl.frontFace(gl.CCW);         
+         gl.lineWidth(2.0);
+      
+      }
+
+      //Updating the camera position
+      function getCameraPosition() {
+         var d_cos_phi = camera.distance*Math.cos(camera.phi);
+         camera.x = d_cos_phi*Math.sin(camera.theta) + camera.lookat.x;
+         camera.y = d_cos_phi*Math.cos(camera.theta) + camera.lookat.y;
+         camera.z = camera.distance*Math.sin(camera.phi) + camera.lookat.z;
+      }
+
+function drawPolyLines(poly) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, poly.vertbuffer);
+      gl.enableVertexAttribArray(program.vertexPosition);
+      gl.vertexAttribPointer(program.vertexPosition, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, poly.wireframeBuffer);
+      gl.drawElements(gl.LINES, poly.numLineIndices, 
+                      gl.UNSIGNED_SHORT, 0);
+  }
+
+  function drawPolyTriangles(poly) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, poly.vertbuffer);
+      gl.enableVertexAttribArray(program.vertexPosition);
+      gl.vertexAttribPointer(program.vertexPosition, 3, gl.FLOAT, false, 0, 0);
+
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, poly.normbuffer);
+      gl.enableVertexAttribArray(program.vertexNormal);
+      gl.vertexAttribPointer(program.vertexNormal, 3, gl.FLOAT, false, 0, 0);
+
+
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, spiral.triangleStripBuffer);      
+      gl.drawElements(gl.TRIANGLE_STRIP, poly.numTriangleStripIndices, 
+                      gl.UNSIGNED_SHORT, 0);
+  }
+
+
+     
+//Main display function clears the frame and does the final MVP
+//calculations before drawing everything      
+      function display() {
+         frame = undefined;
+         
+         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+         // set uniform variables
+         //var bgColor = [0.9, 0.9, 0.5]; only needed these
+         //var lineColor = [0.8, 0.8, 0.3];  for part II
+
+         getCameraPosition();
+         View.identity();
+         View.lookat(camera.x, camera.y, camera.z, camera.lookat.x, camera.lookat.y, camera.lookat.z, 0, 0, 1);
+
+         var ModelView = View.mult(Model);
+         var NormalMatrix = ModelView.normal();
+         var MVP = Projection.mult(ModelView);
+         gl.uniformMatrix4fv(program.ModelViewProjection, false, MVP.array);
+
+         //this code was drastically differnt for just
+         //drawing the spine
+         gl.uniformMatrix4fv(program.ModelViewMatrix, false, ModelView.array);
+         gl.uniformMatrix3fv(program.NormalMatrix, false, NormalMatrix);
+
+         drawPolyTriangles(spiral);
+
+         gl.flush();
+      }
+      </script>
+   </head>
+   <body onload="init(); display()">
+      <h1>Toroidal Spiral</h1>
+      <canvas id="myCanvas" width="400" height="400"></canvas><br />
+      <br />
+      Click and drag to rotate...
+      <hr>
+      <footer>
+        Ryan Slyter<br />
+        October 18, 2014
+      </footer>
+    </body>
+   </html>   
